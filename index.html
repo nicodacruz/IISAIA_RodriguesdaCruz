@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Checkout Infernal — La peor UI posible</title>
+  <style>
+    :root{
+      --bg:#fff36b;
+      --ink:#241133;
+      --bad:#ff00b8;
+      --worse:#00ff6a;
+      --danger:#ff2b2b;
+      --blue:#0038ff;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:"Comic Sans MS","Papyrus",system-ui,sans-serif;
+      background:
+        radial-gradient(circle at 10% 10%, #ff0000 0 9%, transparent 10%),
+        radial-gradient(circle at 90% 15%, #00f 0 8%, transparent 9%),
+        radial-gradient(circle at 40% 90%, #00ff00 0 12%, transparent 13%),
+        var(--bg);
+      color:var(--ink);
+      min-height:100vh;
+      overflow-x:hidden;
+      cursor: crosshair;
+    }
+    body.dark{
+      --bg:#070707;
+      --ink:#7cffd4;
+      --bad:#ff6b00;
+      --worse:#a5ff00;
+      --danger:#ff0066;
+      --blue:#8aa2ff;
+    }
+    marquee{
+      display:block;
+      background:var(--danger);
+      color:white;
+      font-size:26px;
+      font-weight:900;
+      padding:10px 0;
+      border-top:8px dotted cyan;
+      border-bottom:8px dotted cyan;
+      text-shadow:3px 3px black;
+    }
+    .page{max-width:1200px;margin:0 auto;padding:18px;position:relative}
+    .hero{
+      border:13px solid var(--danger);
+      background:#54eaff;
+      color:#23001d;
+      padding:24px;
+      border-radius:44px 8px 60px 12px;
+      box-shadow:18px 18px 0 var(--bad);
+      transform:rotate(-1deg);
+      width:72%;
+      min-width:300px;
+    }
+    h1{font-size:clamp(42px,8vw,86px);line-height:.86;margin:0;text-transform:uppercase;letter-spacing:-5px}
+    .subtitle{font-size:22px;font-weight:900;text-decoration:underline wavy red;margin-bottom:0}
+    .toast{
+      position:fixed;right:18px;top:94px;width:235px;background:#fff;border:6px double #000;color:#000;padding:12px;z-index:20;transform:rotate(3deg);box-shadow:0 0 30px var(--bad);
+    }
+    .layout{display:grid;grid-template-columns:250px 1fr 260px;gap:18px;margin-top:38px;align-items:start}
+    nav,.panel,.summary{border:8px solid #111;background:rgba(255,255,255,.88);color:#111;padding:16px}
+    nav{background:#a5ff00;position:sticky;top:10px;border-color:#0038ff;transform:rotate(1deg)}
+    nav button,.ugly-btn{
+      width:100%;padding:14px 10px;margin:8px 0;border:5px solid #000;background:#ff66c4;font-weight:900;text-align:left;font-size:15px;box-shadow:5px 5px 0 #000;cursor:not-allowed;
+    }
+    nav button:nth-child(odd){transform:translateX(12px)}
+    nav button:nth-child(even){transform:translateX(-8px)}
+    nav button:hover,.ugly-btn:hover{filter:blur(1.2px);background:#ffc400;transform:scale(.96) rotate(2deg)}
+    .panel{min-height:650px;border-style:dashed;border-color:var(--bad);position:relative;overflow:hidden}
+    .step-sticker{position:absolute;right:-20px;top:8px;transform:rotate(15deg);background:var(--danger);color:#fff;border:4px solid #000;padding:12px;font-size:24px;font-weight:900}
+    h2{font-size:38px;margin:0 0 20px;text-shadow:2px 2px #ffe600}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    label,.box{display:block;background:#fff5b5;border:5px solid #000;padding:16px;margin-bottom:18px}
+    label:nth-child(even),.box:nth-child(even){background:#ffd4ec}
+    input,select{
+      width:100%;padding:14px;margin-top:8px;border:5px solid var(--blue);background:#fff;font-size:20px;font-family:inherit;font-weight:900;color:#111;
+    }
+    input[type="checkbox"]{width:34px;height:34px;vertical-align:middle;accent-color:red}
+    input[type="range"]{accent-color:red;transform:rotate(180deg)}
+    .products{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .card{border:5px solid #000;padding:14px;background:#ffde7a;cursor:pointer;min-height:130px;box-shadow:7px 7px 0 #000;font-weight:900}
+    .card.selected{background:#ff3333;color:#fff;transform:scale(.95) rotate(-1deg)}
+    .qty{display:flex;gap:10px;align-items:center}.qty button{font-size:24px;border:5px solid #000;padding:12px 20px;font-weight:900}.qty input{text-align:center;width:90px}
+    #buyBtn{
+      position:fixed;z-index:40;border:8px solid red;background:#000;color:#a5ff00;padding:20px 34px;font-size:28px;font-weight:900;font-family:inherit;box-shadow:0 0 30px red;animation:wobble .28s infinite alternate;cursor:pointer;
+    }
+    @keyframes wobble{from{transform:rotate(-5deg)}to{transform:rotate(5deg)}}
+    .summary{background:#ffc4c4;transform:rotate(-1deg);position:sticky;top:10px}.summary h3{font-size:32px;margin:0 0 12px}.row{display:flex;justify-content:space-between;border-bottom:2px dotted #000;padding:8px 0;gap:10px}.total{font-size:28px;font-weight:900;border-top:5px solid #000;margin-top:12px}.cart{background:#fff;border:4px solid #000;padding:10px;margin-top:16px;min-height:90px}.progressBox{position:fixed;right:18px;bottom:18px;background:#ffb000;color:#000;border:6px solid #000;padding:10px;width:240px;z-index:10}.progress{height:28px;border:4px solid #000;background:#fff;overflow:hidden}.bar{height:100%;background:#00ff00;width:0%;font-size:11px;font-weight:900;white-space:nowrap}.final{text-align:center;padding:70px 10px}.spin{font-size:90px;display:inline-block;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    footer{margin:34px 0 10px;background:#000;color:#fff;border:8px solid lime;padding:18px;text-align:center;letter-spacing:4px;font-size:12px;text-transform:uppercase}
+    .tiny{font-size:12px;font-weight:700}.dangerText{color:red;font-weight:900}.hidden{display:none}.shake{animation:shake .18s 5}@keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(6px)}50%{transform:translateX(-6px)}75%{transform:translateX(3px)}100%{transform:translateX(0)}}
+    @media(max-width:900px){.layout{grid-template-columns:1fr}.hero{width:100%}.toast,.progressBox,#buyBtn{position:static;margin:14px 0;width:auto}.products,.grid{grid-template-columns:1fr}nav,.summary{position:static}}
+  </style>
+</head>
+<body>
+  <marquee>ATENCIÓN: Sitio funcional con interfaz deliberadamente horrible · Cupón secreto: porfavor · No confiar en ningún botón · Comprar es técnicamente posible</marquee>
+  <div class="toast" id="toast"><b>Notificación importante</b><p id="toastText">Bienvenido. Ya empezaste mal.</p><small>Errores acumulados: <span id="errors">0</span></small></div>
+  <div class="progressBox"><b>Progreso emocional</b><div class="progress"><div id="bar" class="bar">0% casi</div></div><button class="ugly-btn" id="modeBtn">Cambiar modo sin avisar</button></div>
+  <main class="page">
+    <section class="hero"><h1>Checkout Infernal</h1><p class="subtitle">Una página donde comprar es posible, pero emocionalmente costoso.</p></section>
+    <section class="layout">
+      <nav><h3>Menú que no ayuda</h3><button data-step="2">9. Inicio</button><button data-step="3">10. Comprar</button><button data-step="1">11. No comprar</button><button data-step="2">12. Ayuda</button><button data-step="1">13. Botón secreto</button></nav>
+      <section class="panel" id="panel">
+        <div class="step-sticker">Paso <span id="stepLabel">1</span>/2</div>
+        <div id="step1">
+          <h2>1. Datos personales innecesariamente difíciles</h2>
+          <div class="grid"><label><b>Nombre completo, pero al revés</b><input id="name" placeholder="Escribí normal, se invierte solo"><small>Guardado como: <span id="savedName">nadie sabe</span></small></label><label><b>Email</b><input id="email" placeholder="tu@email.com"><small>Los puntos se transforman por seguridad imaginaria.</small></label></div>
+          <div class="box"><b>Edad: <span id="ageValue">17</span></b><input id="age" type="range" min="17" max="98" value="17"><p class="tiny">El slider está dado vuelta porque la vida también.</p></div>
+          <button class="ugly-btn" id="nextBtn">Siguiente, creo</button><button class="ugly-btn" id="resetBtn">Reset accidental</button>
+        </div>
+        <div id="step2" class="hidden">
+          <h2>2. Elegí algo sin entender nada</h2>
+          <div class="products" id="products"></div>
+          <div class="grid"><div class="box"><b>Cantidad con botones invertidos</b><div class="qty"><button id="minus">-</button><input id="qty" value="1" readonly><button id="plus">+</button></div><small>- suma y + resta. Diseño honesto.</small></div><label><b>Cupón</b><input id="coupon" placeholder="No te lo voy a decir"><small>El correcto está gritado arriba.</small></label></div>
+          <div class="box"><label style="border:0;background:transparent;padding:0;margin:0"><input id="accepted" type="checkbox"> <b>Acepto términos invisibles, cambios de humor y cargos sorpresa.</b></label><br><label style="border:0;background:transparent;padding:0;margin:0"><input id="newsletter" type="checkbox" checked> <b>No quiero no recibir el newsletter.</b></label></div>
+          <button class="ugly-btn" id="backBtn">Volver hacia adelante</button>
+          <button id="buyBtn">Comprar</button>
+        </div>
+        <div id="step3" class="hidden final"><span class="spin">⚠️</span><h2>Compra casi confirmada</h2><p>Tu carrito tiene <span id="cartCountFinal">0</span> ítem(s). No garantizamos felicidad.</p><button class="ugly-btn" id="sufferBtn">Seguir sufriendo</button></div>
+      </section>
+      <aside class="summary"><h3>Resumen que cambia</h3><div class="row"><span>Producto</span><b id="sumProduct">Membresía Premium</b></div><div class="row"><span>Subtotal</span><b id="subtotal">$0</b></div><div class="row"><span>Descuento</span><b id="discount">-$0</b></div><div class="row"><span>Cargo raro</span><b id="fee">$0</b></div><div class="row total"><span>Total</span><b id="total">$0</b></div><div class="cart"><b>Carrito</b><div id="cartItems"><p>Vacío, como la empatía del diseño.</p></div></div><button class="ugly-btn" id="helpBtn">Ayuda inútil</button></aside>
+    </section>
+    <footer>Legal: al usar esta página aceptás que el botón se escape. Atención al cliente disponible nunca.</footer>
+  </main>
+  <script>
+    const products=[{id:1,name:'Membresía Básica',price:9999},{id:2,name:'Membresía Premium',price:24999},{id:3,name:'Membresía Ultra Confusa',price:39999}];
+    const state={step:1,name:'',email:'',age:17,productId:2,qty:1,coupon:'',accepted:false,cart:[],errors:0};
+    const $=id=>document.getElementById(id); const money=n=>'$'+Math.round(n).toLocaleString('es-AR');
+    function toast(msg){$('toastText').textContent=msg; state.errors++; $('errors').textContent=state.errors; $('toast').classList.remove('shake'); void $('toast').offsetWidth; $('toast').classList.add('shake')}
+    function randomPos(){return {left:(Math.floor(Math.random()*70)+5)+'%',top:(Math.floor(Math.random()*55)+22)+'%'}}
+    function moveBuy(){const p=randomPos(); $('buyBtn').style.left=p.left; $('buyBtn').style.top=p.top}
+    function setStep(n){state.step=n; ['step1','step2','step3'].forEach((id,i)=>$(id).classList.toggle('hidden',i+1!==n)); $('stepLabel').textContent=n; if(n===2)setTimeout(moveBuy,50)}
+    function calc(){const p=products.find(x=>x.id===state.productId); const subtotal=p.price*state.qty; const discount=state.coupon.trim().toLowerCase()==='porfavor'?subtotal*.05:0; const fee=state.accepted?666:1999; const total=subtotal-discount+fee; $('sumProduct').textContent=p.name; $('subtotal').textContent=money(subtotal); $('discount').textContent='-'+money(discount); $('fee').textContent=money(fee); $('total').textContent=money(total); let progress=0;if(state.name.length>2)progress+=19;if(state.email.includes('@'))progress+=17;if(state.accepted)progress+=13;if(state.age>=18)progress+=23;if(state.cart.length)progress+=7;progress=Math.min(progress,99);$('bar').style.width=progress+'%';$('bar').textContent=progress+'% casi';return {p,total}}
+    function renderProducts(){const box=$('products'); box.innerHTML=''; products.forEach(p=>{const b=document.createElement('button'); b.className='card'+(p.id===state.productId?' selected':''); b.innerHTML='<span style="font-size:24px">'+p.name+'</span><br><br>'+money(p.price)+'<br><small>No incluye cargos absurdos.</small>'; b.onclick=()=>{state.productId=p.id;renderProducts();calc()}; box.appendChild(b)})}
+    function renderCart(){const el=$('cartItems'); $('cartCountFinal').textContent=state.cart.length; if(!state.cart.length){el.innerHTML='<p>Vacío, como la empatía del diseño.</p>';return} el.innerHTML=state.cart.map(i=>'<p>'+i.qty+' × '+i.name+' — '+money(i.total)+'</p>').join('')}
+    $('name').oninput=e=>{state.name=e.target.value.split('').reverse().join(''); $('savedName').textContent=state.name||'nadie sabe'; calc()};
+    $('email').oninput=e=>{state.email=e.target.value.replaceAll('.',' punto '); e.target.value=state.email; calc()};
+    $('age').oninput=e=>{state.age=Number(e.target.value);$('ageValue').textContent=state.age;calc()};
+    $('coupon').oninput=e=>{state.coupon=e.target.value;calc()}; $('accepted').onchange=e=>{state.accepted=e.target.checked;calc()};
+    $('minus').onclick=()=>{state.qty=Math.min(state.qty+1,9);$('qty').value=state.qty;calc()}; $('plus').onclick=()=>{state.qty=Math.max(state.qty-1,1);$('qty').value=state.qty;calc()};
+    $('nextBtn').onclick=()=>setStep(2); $('backBtn').onclick=()=>setStep(1); $('sufferBtn').onclick=()=>setStep(2); $('helpBtn').onclick=()=>toast('Ese botón solo existe para decepcionarte.'); $('modeBtn').onclick=()=>document.body.classList.toggle('dark');
+    $('resetBtn').onclick=()=>{state.name='';state.email='';state.age=17;state.productId=2;state.qty=1;state.coupon='';state.accepted=false;state.cart=[];state.errors=0;['name','email','coupon'].forEach(id=>$(id).value='');$('age').value=17;$('ageValue').textContent=17;$('accepted').checked=false;$('qty').value=1;$('errors').textContent=0;$('savedName').textContent='nadie sabe';renderProducts();renderCart();calc();setStep(1);toast('Todo se borró. Gracias por confiar.')};
+    $('buyBtn').onmouseenter=moveBuy; $('buyBtn').onclick=()=>{const c=calc(); if(!state.accepted)return toast('No aceptaste los términos que no leíste.'); if(!state.name.trim())return toast('Falta tu nombre, o tal vez no. Probá de nuevo.'); if(!state.email.includes('@'))return toast('Email inválido según criterios misteriosos.'); if(state.age<18)return toast('Tenés que tener 18, pero el slider arranca en 17 porque sí.'); $('buyBtn').textContent='Pensando...'; setTimeout(()=>{state.cart.push({name:c.p.name,qty:state.qty,total:c.total}); $('buyBtn').textContent='Comprar'; renderCart(); calc(); toast('Producto agregado, probablemente.'); setStep(3)},700)};
+    document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{setStep(Number(b.dataset.step));toast('Entraste a '+b.textContent+', pero te mandé a otro lado.')});
+    renderProducts(); renderCart(); calc(); moveBuy();
+  </script>
+</body>
+</html>
