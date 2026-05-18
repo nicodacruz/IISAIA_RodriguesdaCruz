@@ -1,0 +1,846 @@
+openapi: 3.1.0
+
+info:
+  title: NotarIA API
+  description: >
+    API REST para NotarIA, un sistema de gestión documental pensado para
+    escribanías. El proyecto busca asistir en la carga, procesamiento y consulta
+    de escrituras notariales mediante extracción de metadata, búsqueda sobre
+    documentos y consultas asistidas por IA. Esta especificación define el
+    contrato de la API, no la implementación del backend.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8000
+    description: Desarrollo local
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: health
+    description: Endpoints de verificación del servicio
+  - name: chat
+    description: Conversaciones con el asistente de NotarIA
+  - name: ingest
+    description: Ingesta y seguimiento de documentos notariales
+  - name: documents
+    description: Consulta y gestión de escrituras procesadas
+  - name: generate
+    description: Descarga de documentos generados
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Verifica que el backend esté activo.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Servicio disponible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /chat:
+    post:
+      summary: Enviar mensaje al asistente
+      description: >
+        Envía una consulta al asistente de NotarIA. La consulta puede resolverse
+        mediante metadata estructurada, búsqueda semántica o generación de contenido.
+      tags: [chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Respuesta generada por el asistente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /chat/conversations:
+    get:
+      summary: Listar conversaciones del usuario
+      description: Devuelve las conversaciones del usuario autenticado con paginación simple.
+      tags: [chat]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: UUID de la última conversación vista para paginación.
+          schema:
+            type:
+              - string
+              - "null"
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de conversaciones a devolver.
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Lista paginada de conversaciones
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /chat/conversations/{conversationId}:
+    get:
+      summary: Obtener una conversación
+      description: Devuelve el detalle de una conversación junto con sus mensajes.
+      tags: [chat]
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Detalle de la conversación
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ConversationNotFound"
+    delete:
+      summary: Eliminar una conversación
+      description: >
+        Elimina una conversación del usuario. La operación es idempotente:
+        si la conversación ya no existe, el estado final esperado se mantiene.
+      tags: [chat]
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "204":
+          description: Conversación eliminada correctamente
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ConversationNotFound"
+
+  /ingest:
+    post:
+      summary: Subir escritura para ingestar
+      description: >
+        Recibe un archivo de escritura notarial y crea un job de ingesta para
+        extracción de texto, metadata y entidades relevantes.
+      tags: [ingest]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/IngestRequest"
+      responses:
+        "201":
+          description: Job de ingesta creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /ingest/status/{jobId}:
+    get:
+      summary: Estado de un job de ingesta
+      description: Consulta el estado actual de procesamiento de una escritura subida.
+      tags: [ingest]
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Estado actual del job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/JobNotFound"
+
+  /documents:
+    get:
+      summary: Listar escrituras ingresadas
+      description: >
+        Devuelve una lista de escrituras procesadas, con filtros opcionales
+        por tipo de acto, notario y fecha.
+      tags: [documents]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor de paginación.
+          schema:
+            type: [string, "null"]
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de documentos a devolver.
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: acto_caso
+          in: query
+          required: false
+          description: Caso o tipo específico de acto notarial.
+          schema:
+            type: [string, "null"]
+            example: compraventa
+        - name: notario
+          in: query
+          required: false
+          description: Nombre del escribano o notario.
+          schema:
+            type: [string, "null"]
+        - name: fecha_desde
+          in: query
+          required: false
+          description: Fecha mínima de la escritura.
+          schema:
+            type: [string, "null"]
+            format: date
+        - name: fecha_hasta
+          in: query
+          required: false
+          description: Fecha máxima de la escritura.
+          schema:
+            type: [string, "null"]
+            format: date
+      responses:
+        "200":
+          description: Lista paginada de escrituras
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /documents/{documentId}:
+    get:
+      summary: Detalle de una escritura
+      description: >
+        Devuelve la metadata principal de una escritura, incluyendo acto,
+        lugar, fecha, notario, comparecientes e inmuebles asociados.
+      tags: [documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: Metadata completa de la escritura
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+    delete:
+      summary: Eliminar una escritura
+      description: >
+        Elimina una escritura procesada del sistema. En una implementación real,
+        esta operación también debería eliminar o desvincular sus entidades asociadas.
+      tags: [documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "204":
+          description: Escritura eliminada correctamente
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+
+  /documents/{documentId}/parties:
+    get:
+      summary: Listar comparecientes de una escritura
+      description: >
+        Recurso anidado que devuelve las personas o entidades que intervienen
+        en una escritura determinada.
+      tags: [documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: Lista de comparecientes asociados a la escritura
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartyListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+    post:
+      summary: Agregar compareciente a una escritura
+      description: >
+        Agrega manualmente un compareciente a una escritura ya procesada.
+        Este endpoint representa una posible corrección humana posterior a la ingesta.
+      tags: [documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PartyCreateRequest"
+      responses:
+        "201":
+          description: Compareciente agregado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Party"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /documents/{documentId}/parties/{partyId}:
+    delete:
+      summary: Eliminar compareciente de una escritura
+      description: >
+        Elimina un compareciente asociado a una escritura. Este endpoint muestra
+        una jerarquía de recursos más profunda: documents -> parties.
+      tags: [documents]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+        - $ref: "#/components/parameters/PartyId"
+      responses:
+        "204":
+          description: Compareciente eliminado correctamente
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/PartyNotFound"
+
+  /documents/{documentId}/questions:
+    post:
+      summary: Hacer una pregunta sobre una escritura
+      description: >
+        Permite consultar al asistente sobre el contenido de una escritura
+        específica. Es un recurso anidado porque la pregunta depende del documento.
+      tags: [documents, chat]
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentQuestionRequest"
+      responses:
+        "200":
+          description: Respuesta del asistente basada en la escritura indicada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentQuestionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /generate/docx/{conversationId}:
+    get:
+      summary: Descargar DOCX generado de una conversación
+      description: Devuelve un archivo DOCX generado a partir de una conversación previa.
+      tags: [generate]
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Archivo DOCX generado
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Conversación sin documento generado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT emitido por el proveedor de autenticación.
+
+  parameters:
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      description: Identificador único de la conversación.
+      schema:
+        type: string
+        format: uuid
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      description: Identificador único de la escritura.
+      schema:
+        type: string
+        example: escritura_2024_001
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      description: Identificador único del job de ingesta.
+      schema:
+        type: string
+        format: uuid
+    PartyId:
+      name: partyId
+      in: path
+      required: true
+      description: Identificador único del compareciente.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: La solicitud no pudo ser interpretada correctamente.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Token ausente o inválido.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationError:
+      description: Error de validación en los datos enviados.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+    ConversationNotFound:
+      description: Conversación no encontrada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DocumentNotFound:
+      description: Escritura no encontrada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    JobNotFound:
+      description: Job de ingesta no encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    PartyNotFound:
+      description: Compareciente no encontrado para la escritura indicada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          example: Recurso no encontrado
+
+    ValidationErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+                example: message
+              message:
+                type: string
+                example: El campo es obligatorio
+
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          example: ¿Cuántas compraventas hay del año 2024?
+        conversation_id:
+          type: [string, "null"]
+          format: uuid
+
+    ChatResponse:
+      type: object
+      required: [answer, source_type, conversation_id, message_id]
+      properties:
+        answer:
+          type: string
+          example: Se encontraron 12 escrituras de compraventa registradas en 2024.
+        source_type:
+          type: string
+          enum: [metadata, rag, poder_generator, tipo_detection, chat]
+          description: Modo en que fue procesada la consulta.
+        conversation_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        extra:
+          type: [object, "null"]
+          additionalProperties: true
+
+    ConversationSummary:
+      type: object
+      required: [id, created_at, updated_at, message_count]
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        title:
+          type: [string, "null"]
+          example: Consulta sobre compraventas 2024
+        message_count:
+          type: integer
+          minimum: 0
+          example: 6
+
+    ConversationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationSummary"
+        next_cursor:
+          type: [string, "null"]
+
+    MessageItem:
+      type: object
+      required: [id, role, content, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        source_type:
+          type: [string, "null"]
+        extra:
+          type: [object, "null"]
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    ConversationDetailResponse:
+      type: object
+      required: [id, messages]
+      properties:
+        id:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageItem"
+
+    IngestRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: Archivo PDF o DOCX de la escritura a procesar.
+
+    IngestResponse:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued]
+          example: queued
+
+    IngestStatusResponse:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, done, error]
+        filename:
+          type: [string, "null"]
+          example: escritura_compraventa_2024.pdf
+        error:
+          type: [string, "null"]
+          example: No se pudo extraer texto del archivo
+        created_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: [string, "null"]
+          format: date-time
+
+    DocumentSummary:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+          example: escritura_2024_001
+        acto_clase:
+          type: [string, "null"]
+          example: contrato
+        acto_subclase:
+          type: [string, "null"]
+          example: transferencia_inmueble
+        acto_caso:
+          type: [string, "null"]
+          example: compraventa
+        lugar:
+          type: [string, "null"]
+          example: Ciudad Autónoma de Buenos Aires
+        fecha_iso:
+          type: [string, "null"]
+          format: date
+          example: "2024-06-18"
+        notario:
+          type: [string, "null"]
+          example: Juan Pérez
+
+    DocumentListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSummary"
+        total:
+          type: integer
+          minimum: 0
+          example: 42
+        next_cursor:
+          type: [string, "null"]
+
+    DocumentDetailResponse:
+      type: object
+      required: [file_id, comparecientes, inmuebles]
+      properties:
+        file_id:
+          type: string
+          example: escritura_2024_001
+        acto_clase:
+          type: [string, "null"]
+          example: contrato
+        acto_subclase:
+          type: [string, "null"]
+          example: transferencia_inmueble
+        acto_caso:
+          type: [string, "null"]
+          example: compraventa
+        lugar:
+          type: [string, "null"]
+          example: Ciudad Autónoma de Buenos Aires
+        fecha_iso:
+          type: [string, "null"]
+          format: date
+          example: "2024-06-18"
+        notario:
+          type: [string, "null"]
+          example: Juan Pérez
+        comparecientes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Party"
+        inmuebles:
+          type: array
+          items:
+            $ref: "#/components/schemas/Property"
+
+    Party:
+      type: object
+      required: [id, nombre, rol]
+      properties:
+        id:
+          type: string
+          format: uuid
+        nombre:
+          type: string
+          minLength: 1
+          example: María Gómez
+        rol:
+          type: string
+          enum: [comprador, vendedor, apoderado, notario, testigo, otro]
+          example: comprador
+        documento:
+          type: [string, "null"]
+          example: DNI 12345678
+        domicilio:
+          type: [string, "null"]
+          example: Av. Corrientes 1234, CABA
+
+    PartyCreateRequest:
+      type: object
+      required: [nombre, rol]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: María Gómez
+        rol:
+          type: string
+          enum: [comprador, vendedor, apoderado, notario, testigo, otro]
+          example: comprador
+        documento:
+          type: [string, "null"]
+          maxLength: 100
+          example: DNI 12345678
+        domicilio:
+          type: [string, "null"]
+          maxLength: 300
+          example: Av. Corrientes 1234, CABA
+
+    PartyListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Party"
+
+    Property:
+      type: object
+      properties:
+        tipo:
+          type: [string, "null"]
+          example: departamento
+        direccion:
+          type: [string, "null"]
+          example: Av. Santa Fe 2500, CABA
+        matricula:
+          type: [string, "null"]
+          example: FR 12-3456
+        nomenclatura_catastral:
+          type: [string, "null"]
+          example: Circ. 12, Secc. 4, Manz. 20, Parc. 8
+
+    DocumentQuestionRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: ¿Quiénes son los compradores de esta escritura?
+
+    DocumentQuestionResponse:
+      type: object
+      required: [answer, document_id]
+      properties:
+        answer:
+          type: string
+          example: Los compradores identificados son María Gómez y Carlos Ruiz.
+        document_id:
+          type: string
+          example: escritura_2024_001
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              chunk_id:
+                type: string
+                example: chunk_15
+              page:
+                type: [integer, "null"]
+                example: 3
