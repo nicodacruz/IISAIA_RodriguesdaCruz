@@ -1,0 +1,58 @@
+{
+  "_comment": "Runtime config de Claude Code para NotarIA. Permisos determinísticos del entorno — no instrucciones en lenguaje natural (eso está en CLAUDE.md). settings.local.json puede sobreescribir estas reglas para configuración personal del desarrollador.",
+
+  "model": "claude-sonnet-4-6",
+
+  "permissions": {
+    "allow": [
+      "Bash(pytest*)",
+
+      "Bash(python scripts/check_secrets.py*)",
+      "Bash(python scripts/validate_config.py*)",
+      "Bash(PYTHONPATH=. python scripts/check_secrets.py*)",
+      "Bash(PYTHONPATH=. python scripts/validate_config.py*)",
+
+      "Bash(python cli.py*)",
+      "Bash(PYTHONPATH=. python cli.py*)",
+
+      "Bash(uvicorn*)",
+
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git branch*)",
+      "Bash(git stash*)",
+
+      "Bash(npm run*)",
+
+      "Bash(ls*)",
+      "Bash(find*)",
+      "Bash(grep*)",
+      "Bash(wc*)",
+
+      "Bash(curl -s http://localhost*)"
+    ],
+
+    "deny": [
+      "Bash(rm -rf*)",
+      "Bash(cat .env*)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)"
+    ],
+
+    "ask": [
+      "Bash(git push*)",
+      "Bash(pip install*)",
+      "Bash(pip3 install*)",
+      "Bash(npm install*)"
+    ]
+  },
+
+  "env": {
+    "LLM_BACKEND": "openai",
+    "EMBEDDINGS_BACKEND": "openai",
+    "DATABASE_PATH": "data/notary.db"
+  }
+}

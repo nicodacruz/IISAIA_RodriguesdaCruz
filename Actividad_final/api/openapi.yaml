@@ -1,0 +1,859 @@
+openapi: "3.0.3"
+
+info:
+  title: NotarIA API
+  description: >
+    Backend para el sistema de gestión documental de escribanías argentinas.
+    Ingesta escrituras públicas (PDF/DOC), responde consultas en lenguaje natural
+    (SQL + RAG), permite consultas jurídicas sobre normativa argentina y genera
+    documentos DOCX desde plantillas legales.
+  version: "0.1.0"
+  contact:
+    name: Proyecto NotarIA — FIUBA CEIA
+    email: nrodriguesdacruz@itba.edu.ar
+
+servers:
+  - url: http://localhost:8000
+    description: Desarrollo local
+  - url: https://notaria-backend.up.railway.app
+    description: Producción (Railway)
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: health
+    description: Liveness probe
+  - name: chat
+    description: Mensajes, routing IA y conversaciones
+  - name: ingest
+    description: Ingesta de documentos PDF/DOC
+  - name: documents
+    description: Consulta de escrituras indexadas
+  - name: generate
+    description: Descarga de documentos DOCX generados
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+
+paths:
+
+  # ── Health ──────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Verificar que la API está operativa
+      description: Liveness probe sin autenticación. Usado por Railway y health checks externos.
+      security: []
+      responses:
+        "200":
+          description: API operativa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ── Chat ────────────────────────────────────────────────────────────────────
+
+  /chat:
+    post:
+      tags: [chat]
+      operationId: postChat
+      summary: Enviar un mensaje y obtener respuesta de la IA
+      description: >
+        Punto de entrada principal del sistema. El router clasifica la intención
+        del mensaje y despacha a uno de cinco modos: sql (text-to-SQL),
+        rag (búsqueda semántica en escrituras), legal (RAG sobre normativa argentina),
+        generate (generación conversacional de escrituras DOCX) o chat (respuestas generales).
+        Si hay una sesión de generación activa para conversation_id, el mensaje se
+        rutea directamente al generador conversacional en lugar de pasar por el clasificador.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+            examples:
+              consulta_sql:
+                summary: Consulta de conteo (modo SQL)
+                value:
+                  message: "¿cuántas escrituras de compraventa hay?"
+              consulta_rag:
+                summary: Consulta semántica sobre una escritura
+                value:
+                  message: "¿qué facultades tiene el apoderado en la escritura 20-0287?"
+                  conversation_id: "550e8400-e29b-41d4-a716-446655440000"
+              consulta_legal:
+                summary: Consulta de normativa notarial
+                value:
+                  message: "¿cuáles son los requisitos formales de una escritura pública según el CCC?"
+      responses:
+        "200":
+          description: Respuesta generada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /chat/conversations:
+    get:
+      tags: [chat]
+      operationId: listConversations
+      summary: Listar conversaciones del usuario autenticado
+      description: >
+        Devuelve las conversaciones del usuario ordenadas por última actividad (desc).
+        Usa keyset pagination sobre (updated_at, id) para evitar duplicados cuando
+        múltiples conversaciones comparten el mismo timestamp.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: >
+            UUID de la última conversación vista. Omitir en la primera página.
+            En respuestas sucesivas, usar el valor de next_cursor del response anterior.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Máximo de conversaciones a devolver por página
+      responses:
+        "200":
+          description: Lista paginada de conversaciones
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /chat/conversations/{conversation_id}:
+    get:
+      tags: [chat]
+      operationId: getConversation
+      summary: Obtener todos los mensajes de una conversación
+      description: >
+        Devuelve el historial completo de mensajes de la conversación, ordenados
+        cronológicamente. Solo devuelve conversaciones del usuario autenticado.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID de la conversación
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Historial completo de la conversación
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags: [chat]
+      operationId: deleteConversation
+      summary: Eliminar una conversación y todos sus mensajes
+      description: >
+        Elimina permanentemente la conversación y sus mensajes en cascada.
+        Solo permite borrar conversaciones propias. Operación irreversible.
+        Si hay una sesión de generación activa para esta conversación, se cancela.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID de la conversación a eliminar
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "204":
+          description: Conversación eliminada correctamente. Sin body.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Ingest ──────────────────────────────────────────────────────────────────
+
+  /ingest:
+    post:
+      tags: [ingest]
+      operationId: postIngest
+      summary: Subir un archivo PDF o DOC para ingesta
+      description: >
+        Acepta archivos .pdf, .doc y .docx. La ingesta ocurre en background:
+        el endpoint retorna inmediatamente con un job_id para polling de estado.
+
+        Pipeline: conversión a Markdown → extracción de metadata con LLM →
+        upsert en Postgres → indexación de embeddings en pgvector.
+
+        Requiere rol admin u operator. Readers no pueden ingestar.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Archivo PDF, DOC o DOCX a procesar
+      responses:
+        "200":
+          description: Job de ingesta encolado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El usuario no tiene rol admin u operator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: "Insufficient permissions."
+        "422":
+          description: Tipo de archivo no soportado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+              example:
+                detail: "Unsupported file type '.txt'. Allowed: {'.pdf', '.doc', '.docx'}"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /ingest/status/{job_id}:
+    get:
+      tags: [ingest]
+      operationId: getIngestStatus
+      summary: Consultar el estado de un job de ingesta
+      description: >
+        Polling endpoint para conocer el progreso de la ingesta.
+        Estados posibles: queued → processing → done | error.
+        El campo error solo está presente cuando status = error.
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID del job retornado por POST /ingest
+          example: "7f3c1a2b-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+      responses:
+        "200":
+          description: Estado actual del job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestStatusResponse"
+              examples:
+                en_progreso:
+                  summary: Job en procesamiento
+                  value:
+                    job_id: "7f3c1a2b-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+                    status: processing
+                    filename: "escritura_20-0315.pdf"
+                completado:
+                  summary: Job finalizado
+                  value:
+                    job_id: "7f3c1a2b-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+                    status: done
+                    filename: "escritura_20-0315.pdf"
+                    created_at: "2026-04-15T10:30:00Z"
+                    updated_at: "2026-04-15T10:31:45Z"
+                con_error:
+                  summary: Job fallido
+                  value:
+                    job_id: "7f3c1a2b-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+                    status: error
+                    filename: "documento_corrupto.pdf"
+                    error: "PyMuPDF: cannot open encrypted document"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Documents ───────────────────────────────────────────────────────────────
+
+  /documents:
+    get:
+      tags: [documents]
+      operationId: listDocuments
+      summary: Listar escrituras indexadas con filtros opcionales
+      description: >
+        Devuelve las escrituras del usuario autenticado con filtros opcionales
+        por tipo de acto, año y notario. Usa keyset pagination sobre file_id.
+        Incluye el total de documentos que cumplen los filtros (sin paginación).
+      parameters:
+        - name: acto_caso
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Tipo de acto notarial. Debe ser un valor válido de la taxonomía
+            (config/casos.yaml). Ej: compraventa_inmueble, hipoteca_cancelacion,
+            poder_general_adm_y_judicial.
+          example: compraventa_inmueble
+        - name: anio
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1900
+            maximum: 2100
+          description: Año de la escritura (campo anio de metadata)
+          example: 2023
+        - name: notario
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Nombre del escribano autorizante. Búsqueda parcial case-insensitive
+            (ILIKE %notario%).
+          example: "Mihura Gradin"
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            file_id del último documento visto (keyset pagination ascendente por file_id).
+            Omitir en la primera página.
+          example: "22-0150"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Máximo de documentos a devolver por página
+      responses:
+        "200":
+          description: Lista paginada de escrituras
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /documents/{file_id}:
+    get:
+      tags: [documents]
+      operationId: getDocument
+      summary: Obtener metadata completa de una escritura
+      description: >
+        Devuelve la metadata estructurada de una escritura incluyendo los comparecientes
+        (personas físicas y jurídicas que intervinieron) y los inmuebles referenciados.
+        Solo devuelve documentos del usuario autenticado (aislamiento multi-tenant).
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: >
+            Identificador único de la escritura. Formato: YYYY-NNNN o YYYY-NNNNsufijo
+            (ej: 20-0287, 20-0298TER, 25-0026BIS). El sufijo BIS/TER/QUATER es parte
+            del file_id y no debe omitirse.
+          example: "20-0287"
+      responses:
+        "200":
+          description: Metadata completa de la escritura
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Generate ─────────────────────────────────────────────────────────────────
+
+  /generate/docx/{conversation_id}:
+    get:
+      tags: [generate]
+      operationId: downloadDocx
+      summary: Descargar el DOCX generado al final de una sesión conversacional
+      description: >
+        Disponible solo cuando la sesión de generación para conversation_id está en
+        estado gen_complete. El archivo se genera en memoria durante la última vuelta
+        del generador y se retiene temporalmente en el servidor.
+        Retorna 404 si la generación no está completa o si conversation_id no existe.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID de la conversación donde se completó la generación
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Archivo DOCX listo para descargar
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              description: Nombre de archivo sugerido para la descarga
+              schema:
+                type: string
+              example: 'attachment; filename="escritura_compraventa_inmueble.docx"'
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT emitido por Supabase Auth (RS256/JWKS). Incluir en el header
+        Authorization: Bearer <token>. Si SUPABASE_URL no está configurado
+        en el servidor, se usa dev mode (user_id = "dev-user") sin validación.
+
+  responses:
+    Unauthorized:
+      description: Token JWT ausente, expirado o inválido
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "Not authenticated"
+
+    NotFound:
+      description: Recurso no encontrado o no pertenece al usuario autenticado
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "Conversation 550e8400-e29b-41d4-a716-446655440000 not found."
+
+    InternalError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "Internal server error"
+
+  schemas:
+
+    # ── Requests ──────────────────────────────────────────────────────────────
+
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: Texto del mensaje del usuario
+          example: "¿cuántas escrituras de compraventa hay en 2023?"
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            UUID de la conversación existente. Omitir para iniciar una nueva.
+            Requerido para continuar sesiones de generación activas.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    # ── Chat responses ────────────────────────────────────────────────────────
+
+    ChatResponse:
+      type: object
+      required: [answer, source_type, conversation_id, message_id]
+      properties:
+        answer:
+          type: string
+          description: Respuesta generada por el sistema en texto plano o Markdown
+          example: "Hay **12** escrituras de compraventa registradas en 2023."
+        source_type:
+          type: string
+          description: >
+            Origen de la respuesta. Valores posibles:
+            - metadata: respuesta via text-to-SQL (badge SQL)
+            - rag: búsqueda semántica en escrituras (badge RAG)
+            - legal: RAG sobre normativa argentina (badge LEX)
+            - gen_active: sesión de generación en curso (badge GEN)
+            - gen_complete: generación finalizada, DOCX listo para descargar
+            - poder_generator: inicio de sesión de generación
+            - tipo_detection: tipo detectado sin sistema conversacional disponible
+            - chat: respuesta conversacional general
+          example: metadata
+        conversation_id:
+          type: string
+          format: uuid
+          description: UUID de la conversación (nueva o existente)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        message_id:
+          type: string
+          format: uuid
+          description: UUID del mensaje del asistente en esta respuesta
+          example: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+        extra:
+          type: object
+          nullable: true
+          description: >
+            Metadatos adicionales según el source_type. Para sql: {record, file_id}.
+            Para rag/legal: {hits, where}. Para gen_active: {acto_caso, tipo_nombre, progress}.
+          additionalProperties: true
+
+    ConversationSummary:
+      type: object
+      required: [id, created_at, updated_at, message_count]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-15T14:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-04-15T14:35:22Z"
+        title:
+          type: string
+          nullable: true
+          description: Primeros 80 caracteres del primer mensaje del usuario
+          example: "¿cuántas escrituras de compraventa hay?"
+        message_count:
+          type: integer
+          default: 0
+          description: Total de mensajes en la conversación (usuario + asistente)
+          example: 6
+
+    ConversationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationSummary"
+        next_cursor:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            UUID de la última conversación de esta página. Pasar como cursor
+            en la siguiente request para obtener la página siguiente.
+            null cuando no hay más resultados.
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+
+    MessageItem:
+      type: object
+      required: [id, role, content, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          description: Texto del mensaje (usuario) o respuesta Markdown (asistente)
+        source_type:
+          type: string
+          nullable: true
+          description: >
+            Solo presente en mensajes del asistente. Valores normalizados para DB:
+            sql, rag, generate, chat.
+        extra:
+          type: object
+          nullable: true
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    ConversationDetailResponse:
+      type: object
+      required: [id, messages]
+      properties:
+        id:
+          type: string
+          description: UUID de la conversación
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageItem"
+          description: Lista completa de mensajes en orden cronológico
+
+    # ── Ingest ────────────────────────────────────────────────────────────────
+
+    IngestResponse:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          description: UUID único del job de ingesta para polling
+          example: "7f3c1a2b-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+        status:
+          type: string
+          enum: [queued]
+          default: queued
+          description: Estado inicial al crear el job
+
+    IngestStatusResponse:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          example: "7f3c1a2b-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+        status:
+          type: string
+          enum: [queued, processing, done, error]
+          description: Estado actual del job de ingesta
+          example: done
+        filename:
+          type: string
+          nullable: true
+          description: Nombre original del archivo subido
+          example: "escritura_compraventa_2026.pdf"
+        error:
+          type: string
+          nullable: true
+          description: Mensaje de error. Solo presente cuando status = error.
+          example: "PyMuPDF: cannot open encrypted document"
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-04-15T10:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-04-15T10:31:45Z"
+
+    # ── Documents ─────────────────────────────────────────────────────────────
+
+    DocumentSummary:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+          description: >
+            Identificador único de la escritura. Formato YYYY-NNNN o con sufijo
+            BIS/TER/QUATER. El sufijo es parte del ID y no se separa.
+          example: "20-0287"
+        acto_clase:
+          type: string
+          nullable: true
+          description: Primer nivel de la taxonomía
+          example: instrumento_publico_notarial
+        acto_subclase:
+          type: string
+          nullable: true
+          description: Segundo nivel de la taxonomía
+          example: escritura_publica
+        acto_caso:
+          type: string
+          nullable: true
+          description: Tipo específico del acto (leaf de la taxonomía)
+          example: compraventa_inmueble
+        lugar:
+          type: string
+          nullable: true
+          example: "Ciudad de Buenos Aires"
+        fecha_iso:
+          type: string
+          nullable: true
+          description: Fecha del acto en formato ISO 8601 (DATE)
+          example: "2020-03-15"
+        notario:
+          type: string
+          nullable: true
+          description: Nombre completo y matrícula del escribano autorizante
+          example: "Agustín Mihura Gradin Mat. 5109"
+
+    DocumentListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSummary"
+        total:
+          type: integer
+          description: >
+            Total de documentos que cumplen los filtros activos (sin paginación).
+            Útil para mostrar "X de Y escrituras".
+          example: 83
+        next_cursor:
+          type: string
+          nullable: true
+          description: >
+            file_id del último documento de esta página. Pasar como cursor
+            en la siguiente request. null cuando no hay más resultados.
+          example: "22-0150"
+
+    Compareciente:
+      type: object
+      description: Persona física o jurídica que interviene en el acto notarial
+      properties:
+        nombre:
+          type: string
+          nullable: true
+          example: "Diego Marcos RIPA"
+        dni:
+          type: string
+          nullable: true
+          description: DNI (solo últimos 4 dígitos en logs; completo en DB)
+          example: "16202730"
+        cuil_cuit:
+          type: string
+          nullable: true
+          example: "20-16202730-2"
+        domicilio:
+          type: string
+          nullable: true
+          example: "Gorriti 445, Avellaneda, Provincia de Buenos Aires"
+        representa_a:
+          type: string
+          nullable: true
+          description: Nombre de la persona o entidad representada (si actúa como apoderado)
+        tipo_entidad:
+          type: string
+          nullable: true
+          description: Tipo del compareciente (persona_fisica, banco, sociedad_anonima, etc.)
+        tipo_entidad_representada:
+          type: string
+          nullable: true
+
+    Inmueble:
+      type: object
+      description: Bien inmueble referenciado en el acto notarial
+      properties:
+        descripcion:
+          type: string
+          nullable: true
+        nomenclatura_catastral:
+          type: string
+          nullable: true
+          description: >
+            CABA: Circunscripción N, Sección N, Manzana N, Parcela N.
+            Provincia: varía según jurisdicción.
+          example: "Circunscripción 15, Sección A, Manzana 42, Parcela 8"
+        partida:
+          type: string
+          nullable: true
+          description: Partida inmobiliaria del Registro de la Propiedad
+          example: "1.452.350 DV 06"
+        matricula:
+          type: string
+          nullable: true
+          example: "FR 9-655/16"
+        valuacion_fiscal:
+          type: string
+          nullable: true
+        vir_vr:
+          type: string
+          nullable: true
+          description: Valor Inmobiliario de Referencia (VIR) para CABA
+
+    DocumentDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/DocumentSummary"
+        - type: object
+          properties:
+            comparecientes:
+              type: array
+              items:
+                $ref: "#/components/schemas/Compareciente"
+              description: >
+                Personas que intervienen en el acto. Un compareciente puede actuar
+                en múltiples roles simultáneamente (propio_derecho, apoderado,
+                representante_sa, asentimiento).
+            inmuebles:
+              type: array
+              items:
+                $ref: "#/components/schemas/Inmueble"
+              description: Bienes inmuebles referenciados. Vacío si el acto no involucra inmuebles.
+
+    # ── Errors ────────────────────────────────────────────────────────────────
+
+    ErrorDetail:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: Descripción legible del error (formato estándar de FastAPI HTTPException)
+          example: "Conversation 550e8400-e29b-41d4-a716-446655440000 not found."
